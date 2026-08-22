@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Ticket Booking Platform</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; margin: 0; padding: 30px; }
+    h1 { margin-bottom: 5px; }
+    .legend { margin-bottom: 20px; font-size: 14px; color: #94a3b8; }
+    .grid { display: grid; grid-template-columns: repeat(4, 80px); gap: 12px; justify-content: center; margin: 25px auto; max-width: 400px; }
+    .seat { padding: 18px 0; border-radius: 8px; font-weight: 700; cursor: pointer; border: 2px solid transparent; transition: 0.2s all; }
+    .AVAILABLE { background: #10b981; color: #0f172a; }
+    .HELD { background: #f59e0b; color: #0f172a; cursor: not-allowed; }
+    .BOOKED { background: #ef4444; color: #ffffff; cursor: not-allowed; }
+    .card { background: #1e293b; max-width: 420px; margin: 20px auto; padding: 20px; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
+    button.action { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+    button.action:hover { background: #2563eb; }
+    img { margin-top: 15px; border-radius: 8px; background: white; padding: 8px; }
+  </style>
+</head>
+<body>
+  <h1 id="eventTitle">Loading Event...</h1>
+  <div class="legend">🟢 Available | 🟡 Held (TTL Active) | 🔴 Booked</div>
+
+  <div id="seatGrid" class="grid"></div>
+  <div id="statusSection" class="card" style="display:none;"></div>
+
+  <div id="ticketCard" class="card" style="display:none;">
+    <h2>🎉 Booking Confirmed!</h2>
+    <p id="refText"></p>
+    <img id="qrImg" alt="QR Ticket" />
+  </div>
+
+  <script>
+    let eventId = '';
+    let userId = '';
+    let currentHeldSeatId = null;
+
+    async function init() {
+      const res = await fetch('/api/events/init');
+      const data = await res.json();
+      eventId = data.event.id;
+      userId = data.user.id;
+      document.getElementById('eventTitle').innerText = data.event.title;
+      renderSeats(data.seats);
+    }
+
+    function renderSeats(seats) {
+      seats.sort((a, b) =>
+        a.seatLabel.localeCompare(b.seatLabel, undefined, { numeric: true, sensitivity: 'base' })
+      );
+      const grid = document.getElementById('seatGrid');
+      grid.innerHTML = '';
+      seats.forEach(seat => {
+        const btn = document.createElement('button');
+        btn.className = `seat ${seat.status}`;
+        btn.innerText = seat.seatLabel;
+        if (seat.status === 'AVAILABLE') {
+          btn.onclick = () => holdSeat(seat.id, seat.seatLabel);
+        }
+        grid.appendChild(btn);
+      });
+    }
+
+    async function refreshSeats() {
+      const res = await fetch('/api/events/init');
+      const data = await res.json();
+      renderSeats(data.seats);
+    }
+
+    async function holdSeat(seatId, label) {
+      const res = await fetch('/api/seats/hold', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatId, userId })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        currentHeldSeatId = seatId;
+        const statusBox = document.getElementById('statusSection');
+        statusBox.style.display = 'block';
+        statusBox.innerHTML = `
+          <p>Held Seat: <strong>${label}</strong> (TTL: 60s)</p>
+          <button class="action" onclick="confirmPayment()">Confirm & Generate QR</button>
+        `;
+        refreshSeats();
+      } else {
+        alert(data.error);
+      }
+    }
+
+    async function confirmPayment() {
+      const res = await fetch('/api/bookings/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatId: currentHeldSeatId, userId })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        document.getElementById('statusSection').style.display = 'none';
+        const ticketCard = document.getElementById('ticketCard');
+        ticketCard.style.display = 'block';
+        document.getElementById('refText').innerText = `Booking Ref: ${data.bookingReference}`;
+        document.getElementById('qrImg').src = data.qrCode;
+        refreshSeats();
+      } else {
+        alert(data.error);
+      }
+    }
+
+    setInterval(refreshSeats, 3000);
+    window.onload = init;
+  </script>
+</body>
+</html>
